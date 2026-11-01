@@ -17,6 +17,31 @@ status
 stop
 ```
 
+## Fake SSIDs (5G beacon spam)
+
+Generate 100 fake 5G SSIDs on the current channel:
+
+```text
+ch 36
+beaconspam auto 100
+status
+stopbeacons
+```
+
+Or use custom names (up to 128):
+
+```text
+ch 36
+beaconspam MyNet-1,MyNet-2,MyNet-3
+stopbeacons
+```
+
+`beaconspam` switches the C5 to AP mode; `scan`, `findsta`, and deauth are
+unavailable until `stopbeacons` restores STA mode. The AP/driver rotates the
+injected beacons at roughly 80–90 per second, so a single scan may show only a
+subset of a large list. The fake networks are open and have no DHCP/portal
+behind them.
+
 ## Notes
 
 - `findsta` needs the client to transmit. Ping it from another machine, or

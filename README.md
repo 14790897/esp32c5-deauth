@@ -31,6 +31,9 @@ and send targeted 802.11 deauthentication frames across 2.4 GHz and 5 GHz.
   - `target <mac>` — client MAC to target.
   - `bssid <mac> [ch]` — add an AP BSSID with an optional channel (up to 8).
   - `ch <ch>`, `start`, `stop`, `status`.
+  - `beaconspam <ssid1,ssid2,...>` / `beaconspam auto <n>` — broadcast fake
+    open beacons on the current channel (up to 128 SSIDs; switches to AP mode).
+  - `stopbeacons` — stop beacon spam and restore STA mode.
 - Per-BSSID channels and automatic 2.4 GHz/5 GHz band switching.
 - Fixed 20 MHz bandwidth so channel tuning and `findsta` reports are exact.
 - 20 dBm max TX power.
@@ -126,6 +129,19 @@ stop
 `findsta` needs the client to be active; keep some traffic flowing (e.g., ping
 the client from another machine) while it sweeps.
 
+Fake 5G networks (beacon spam):
+
+```text
+ch 36
+beaconspam auto 100
+status
+stopbeacons
+```
+
+Use `beaconspam name1,name2,...` for custom SSIDs. While beacons are running
+the C5 is in AP mode; `scan`, `findsta`, and deauth are unavailable until
+`stopbeacons`.
+
 ## Technical notes
 
 - **Deauth is per BSSID.** A deauth/disassoc frame removes a client from one
@@ -145,6 +161,14 @@ the client from another machine) while it sweeps.
   USB ports/cables. Use a short, thick cable and a direct USB 3.x port or a
   powered hub. A `E BOD: Brownout detector was triggered` reset is a power
   delivery issue, not a firmware bug.
+- **Beacon spam is sent from AP mode.** On the C5 the STA interface can accept
+  beacon frames but does not reliably transmit them; the firmware starts a
+  hidden AP and injects the fake beacons via `WIFI_IF_AP` on the AP's channel.
+- **100 SSIDs vs. visibility.** The firmware can rotate up to 128 SSIDs, but
+  the AP/driver sustains roughly 80–90 injected beacons per second. Each SSID
+  is advertised in rotation, so a single phone scan may show only a subset;
+  repeated scans see more. The fake networks are open and cannot actually be
+  associated with (there is no DHCP or portal behind them).
 - **Vendor check.** IDF 6.1's ESP32-C5 `libnet80211.a` includes a sanity check
   that rejects deauth/disassoc injected with `esp_wifi_80211_tx()`. The patch
   script bypasses that check locally. This is intended for research and

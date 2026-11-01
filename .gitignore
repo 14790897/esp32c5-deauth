@@ -1,0 +1,13 @@
+build/
+sdkconfig
+sdkconfig.old
+sdkconfig.ci
+toolchain_shim/*.exe
+lib_stock/
+lib_patched/
+patched_libnet/
+*.pyc
+__pycache__/
+*.bin
+*.elf
+*.map

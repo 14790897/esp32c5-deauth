@@ -164,10 +164,16 @@ the C5 is in AP mode; `scan`, `findsta`, and deauth are unavailable until
   default bandwidth, `esp_wifi_set_channel()` reports and transmissions can
   refer to a segment rather than the AP's primary channel, which makes
   `findsta` results misleading.
-- **Power.** ESP32-C5 boards can brown out during Wi-Fi PHY init or TX on weak
-  USB ports/cables. Use a short, thick cable and a direct USB 3.x port or a
-  powered hub. A `E BOD: Brownout detector was triggered` reset is a power
-  delivery issue, not a firmware bug.
+- **Power / USB hubs.** ESP32-C5 boards can brown out during Wi-Fi PHY init
+  or TX on weak USB ports/cables. Prefer a **direct motherboard USB port**
+  (USB 3.x if available) with a short, thick data cable. **Avoid USB hubs**,
+  especially unpowered ones: the C5's peak current can exceed what a hub (or
+  a front-panel/extension port) can deliver, causing
+  `E BOD: Brownout detector was triggered` resets. A genuinely powered hub
+  with an adequate power adapter may work, but a direct connection is the
+  most reliable. A BOD reset is a power-delivery issue, not a firmware bug.
+  （中文：尽量直连主板 USB 口，优先 USB 3.x，用短而粗的数据线；避免
+  USB Hub、前置口和延长线，峰值电流不足会触发 brownout 复位。）
 - **Beacon spam is experimental and currently non-functional on the C5.**
   The radio can transmit on 5 GHz (deauth works), but the AP beacon TX path
   does not transmit injected beacons with foreign BSSIDs. See

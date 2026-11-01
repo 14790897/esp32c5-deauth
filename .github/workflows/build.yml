@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -27,12 +27,23 @@ jobs:
           # exact IDF version used to build. The container is disposable.
           command: python3 tools/patch_libnet80211.py && idf.py build
 
-      - name: Upload firmware artifacts
-        uses: actions/upload-artifact@v4
+      - name: Publish firmware release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
         with:
-          name: esp32c5-deauth-firmware
-          path: |
+          tag_name: latest
+          name: Latest firmware
+          body: |
+            Automated ESP32-C5 firmware build.
+
+            Commit: ${{ github.sha }}
+            Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            For authorized testing only. See the README for toolchain and
+            library patch steps.
+          files: |
             build/c5_deauth.bin
             build/bootloader/bootloader.bin
             build/partition_table/partition-table.bin
-          if-no-files-found: error
+          overwrite_files: true
+          make_latest: true

@@ -2,6 +2,9 @@
 
 [![firmware](https://github.com/14790897/esp32c5-deauth/actions/workflows/build.yml/badge.svg)](https://github.com/14790897/esp32c5-deauth/actions/workflows/build.yml)
 
+Prebuilt firmware binaries are attached to the
+[latest release](https://github.com/14790897/esp32c5-deauth/releases/latest).
+
 Minimal ESP32-C5 firmware for **authorized** Wi-Fi security testing: a serial
 CLI that can scan, locate a client's current AP, inspect RSN/PMF capabilities,
 and send targeted 802.11 deauthentication frames across 2.4 GHz and 5 GHz.

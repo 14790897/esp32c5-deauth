@@ -169,17 +169,68 @@ the C5 is in AP mode; `scan`, `findsta`, and deauth are unavailable until
   powered hub. A `E BOD: Brownout detector was triggered` reset is a power
   delivery issue, not a firmware bug.
 - **Beacon spam is experimental and currently non-functional on the C5.**
-  On ESP32-C5 + IDF 6.1, AP mode came up only on 2.4 GHz (the AP's own hidden
-  beacon was visible on ch1), the 5 GHz AP was never observed, and fake BSSIDs
-  injected through `WIFI_IF_AP` were accepted by `esp_wifi_80211_tx` (30 pps
-  reported) but did not appear on air in an independent scan or on a phone.
-  An early scan once saw three fake BSSIDs, but the result was not
-  reproducible. The code is kept for experimentation with other
-  targets/drivers; it is not a working feature here.
+  The radio can transmit on 5 GHz (deauth works), but the AP beacon TX path
+  does not transmit injected beacons with foreign BSSIDs. See
+  [Why 5G beacon spam is not supported on this board](#why-5g-beacon-spam-is-not-supported-on-this-board)
+  for the evidence and the single-RF-chain constraint.
 - **Vendor check.** IDF 6.1's ESP32-C5 `libnet80211.a` includes a sanity check
   that rejects deauth/disassoc injected with `esp_wifi_80211_tx()`. The patch
   script bypasses that check locally. This is intended for research and
   authorized testing; review what you are changing before running it.
+
+## Why 5G beacon spam is not supported on this board
+
+It is not a matter of the C5 being unable to transmit on 5 GHz: targeted
+deauth on channel 36 works. The limitation is in the beacon transmit path and
+in the C5's single-radio architecture.
+
+- **One RF chain.** The ESP32-C5 has a single RF chain; STA and SoftAP must
+  share one channel. Espressif describes this in
+  [esp-idf#18334](https://github.com/espressif/esp-idf/issues/18334). A 5 GHz
+  STA forces the SoftAP onto the same 5 GHz channel, and a 2.4 GHz AP cannot
+  coexist with a 5 GHz STA. In testing, an AP-only configuration came up on
+  2.4 GHz (its own hidden beacon was visible on channel 1), while a requested
+  5 GHz AP was never observed.
+- **The AP beacon scheduler owns beacon TX.** Starting an AP makes the driver
+  emit that AP's own beacon. Raw beacon frames injected with
+  `esp_wifi_80211_tx(WIFI_IF_AP, ...)` return `ESP_OK` (the firmware even
+  reports ~30 pps), but they do not appear on air. Setting `en_sys_seq=true`
+  or changing the fake BSSID to the AP's own MAC did not change this. The
+  frames are accepted and then dropped in the AP TX path.
+- **The vendor library patch does not cover this.**
+  `tools/patch_libnet80211.py` only bypasses
+  `ieee80211_raw_frame_sanity_check` (the frame-type allowlist in
+  `libnet80211.a`). It does not change the AP beacon queue/scheduler in the
+  closed-source Wi-Fi firmware.
+- **Evidence.** Tested with 3, 8, and 100 fake SSIDs on 2.4 GHz channel 1 and
+  5 GHz channel 36; scanned with an independent RTL8821CE adapter
+  (`iw scan flush`) and a phone. The AP's own beacon was visible on 2.4 GHz;
+  no fake BSSID was observed on air, and the phone never showed the fake
+  SSIDs. One early PVE scan once listed three fake BSSIDs, but it was not
+  reproducible.
+
+Plain-language version: deauth is like handing a note to one client, which
+the STA interface allows. A beacon is like a broadcast signboard; the AP's
+beacon scheduler owns that signboard and only displays the AP's own BSS. The
+radio can transmit on 5 GHz, but you cannot make it broadcast a custom beacon
+with a foreign BSSID.
+
+What does work:
+
+- Deauth/disassoc on 2.4 GHz and 5 GHz (this repository's core feature).
+- 2.4 GHz beacon spam on an ESP32-S3 running GhostESP; that driver allows
+  injected beacons.
+- Multiple 5 GHz SSIDs from a real 5 GHz AP/router (most routers support
+  several SSIDs per band).
+
+A C5 module with more flash/PSRAM (e.g., N16R8) does not remove these
+RF/driver limitations.
+
+**中文摘要：** C5 能发 5G 信号（deauth 已在 ch36 验证），但只有一个 RF
+chain，STA/SoftAP 必须同信道；AP 固件只发送自己的 beacon，注入的假 BSSID
+beacon 会被驱动静默丢弃。`libnet80211.a` 补丁只绕过帧类型检查，管不到 AP
+的 beacon 发送路径。因此这块 C5 做不了 5G 假 SSID；2.4G beacon spam 可用
+S3 + GhostESP，多 5G SSID 请用真实 5G AP/路由器。
 
 ## Repository layout
 

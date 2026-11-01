@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Build with ESP-IDF v6.1
         uses: espressif/esp-idf-ci-action@v1
@@ -27,23 +29,10 @@ jobs:
           # exact IDF version used to build. The container is disposable.
           command: python3 tools/patch_libnet80211.py && idf.py build
 
-      - name: Publish firmware release
+      - name: Semantic release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          name: Latest firmware
-          body: |
-            Automated ESP32-C5 firmware build.
-
-            Commit: ${{ github.sha }}
-            Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-            For authorized testing only. See the README for toolchain and
-            library patch steps.
-          files: |
-            build/c5_deauth.bin
-            build/bootloader/bootloader.bin
-            build/partition_table/partition-table.bin
-          overwrite_files: true
-          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npm install --no-audit --no-fund
+          npx semantic-release

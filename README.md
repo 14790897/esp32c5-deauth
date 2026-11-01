@@ -4,6 +4,10 @@
 
 Prebuilt firmware binaries are attached to the
 [latest release](https://github.com/14790897/esp32c5-deauth/releases/latest).
+Releases are versioned automatically with
+[semantic-release](https://semantic-release.gitbook.io/) from Conventional
+Commits: `feat:` / `fix:` / `perf:` (and breaking changes) produce a new
+version and attach the three firmware images.
 
 Minimal ESP32-C5 firmware for **authorized** Wi-Fi security testing: a serial
 CLI that can scan, locate a client's current AP, inspect RSN/PMF capabilities,

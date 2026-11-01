@@ -1,0 +1,26 @@
+{
+  "branches": ["main"],
+  "plugins": [
+    "@semantic-release/commit-analyzer",
+    "@semantic-release/release-notes-generator",
+    [
+      "@semantic-release/github",
+      {
+        "assets": [
+          {
+            "path": "build/c5_deauth.bin",
+            "label": "Application image (flash at 0x10000)"
+          },
+          {
+            "path": "build/bootloader/bootloader.bin",
+            "label": "Bootloader (flash at 0x2000)"
+          },
+          {
+            "path": "build/partition_table/partition-table.bin",
+            "label": "Partition table (flash at 0x8000)"
+          }
+        ]
+      }
+    ]
+  ]
+}

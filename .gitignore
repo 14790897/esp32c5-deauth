@@ -11,3 +11,4 @@ __pycache__/
 *.bin
 *.elf
 *.map
+node_modules/

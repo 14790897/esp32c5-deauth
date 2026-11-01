@@ -482,6 +482,8 @@ static void start_beacons(char *list)
         return;
     }
 
+    printf("WARNING: beacon spam is experimental; injected beacons may not transmit on ESP32-C5.\n");
+
     s_beacon_ch = s_channel;
     if (s_beacon_ch <= 0) {
         s_beacon_ch = 36;
@@ -690,8 +692,8 @@ static void print_help(void)
     printf("  bssid <mac> [ch]     add AP BSSID with optional channel\n");
     printf("  clear                clear BSSID list\n");
     printf("  ch <channel>         set channel (1-13, 36-165)\n");
-    printf("  beaconspam <ssid,..> fake beacons on current channel\n");
-    printf("  beaconspam auto <n>  generate n fake 5G SSIDs (max 128)\n");
+    printf("  beaconspam <ssid,..> experimental (may not transmit on C5)\n");
+    printf("  beaconspam auto <n>  experimental; generate n fake SSIDs\n");
     printf("  stopbeacons          stop fake SSID beacons\n");
     printf("  start / stop         start or stop deauth\n");
     printf("  status               show config\n");

@@ -19,6 +19,10 @@ stop
 
 ## Fake SSIDs (5G beacon spam)
 
+> **Experimental / unsupported on ESP32-C5.** The C5 AP came up only on
+> 2.4 GHz, the 5 GHz AP was never observed, and injected fake BSSIDs were not
+> seen on air. The commands are kept for experimentation with other targets.
+
 Generate 100 fake 5G SSIDs on the current channel:
 
 ```text

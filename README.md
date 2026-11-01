@@ -31,8 +31,8 @@ and send targeted 802.11 deauthentication frames across 2.4 GHz and 5 GHz.
   - `target <mac>` — client MAC to target.
   - `bssid <mac> [ch]` — add an AP BSSID with an optional channel (up to 8).
   - `ch <ch>`, `start`, `stop`, `status`.
-  - `beaconspam <ssid1,ssid2,...>` / `beaconspam auto <n>` — broadcast fake
-    open beacons on the current channel (up to 128 SSIDs; switches to AP mode).
+  - `beaconspam <ssid1,ssid2,...>` / `beaconspam auto <n>` — **experimental;
+    currently non-functional on ESP32-C5** (see the beacon-spam note below).
   - `stopbeacons` — stop beacon spam and restore STA mode.
 - Per-BSSID channels and automatic 2.4 GHz/5 GHz band switching.
 - Fixed 20 MHz bandwidth so channel tuning and `findsta` reports are exact.
@@ -129,6 +129,13 @@ stop
 `findsta` needs the client to be active; keep some traffic flowing (e.g., ping
 the client from another machine) while it sweeps.
 
+> **Experimental / unsupported on ESP32-C5.** In testing, the C5 AP came up
+> only on 2.4 GHz, the 5 GHz AP never appeared, and fake BSSIDs injected via
+> `WIFI_IF_AP` were accepted by the driver but not observed on air by an
+> independent scanner or a phone. Do not expect this to create visible fake
+> SSIDs on this hardware. The commands are kept for experimentation with
+> other targets/drivers.
+
 Fake 5G networks (beacon spam):
 
 ```text
@@ -161,14 +168,14 @@ the C5 is in AP mode; `scan`, `findsta`, and deauth are unavailable until
   USB ports/cables. Use a short, thick cable and a direct USB 3.x port or a
   powered hub. A `E BOD: Brownout detector was triggered` reset is a power
   delivery issue, not a firmware bug.
-- **Beacon spam is sent from AP mode.** On the C5 the STA interface can accept
-  beacon frames but does not reliably transmit them; the firmware starts a
-  hidden AP and injects the fake beacons via `WIFI_IF_AP` on the AP's channel.
-- **100 SSIDs vs. visibility.** The firmware can rotate up to 128 SSIDs, but
-  the AP/driver sustains roughly 80–90 injected beacons per second. Each SSID
-  is advertised in rotation, so a single phone scan may show only a subset;
-  repeated scans see more. The fake networks are open and cannot actually be
-  associated with (there is no DHCP or portal behind them).
+- **Beacon spam is experimental and currently non-functional on the C5.**
+  On ESP32-C5 + IDF 6.1, AP mode came up only on 2.4 GHz (the AP's own hidden
+  beacon was visible on ch1), the 5 GHz AP was never observed, and fake BSSIDs
+  injected through `WIFI_IF_AP` were accepted by `esp_wifi_80211_tx` (30 pps
+  reported) but did not appear on air in an independent scan or on a phone.
+  An early scan once saw three fake BSSIDs, but the result was not
+  reproducible. The code is kept for experimentation with other
+  targets/drivers; it is not a working feature here.
 - **Vendor check.** IDF 6.1's ESP32-C5 `libnet80211.a` includes a sanity check
   that rejects deauth/disassoc injected with `esp_wifi_80211_tx()`. The patch
   script bypasses that check locally. This is intended for research and

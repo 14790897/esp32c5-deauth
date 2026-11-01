@@ -8,6 +8,10 @@
       {
         "assets": [
           {
+            "path": "build/c5_deauth_full.bin",
+            "label": "Full flash image (flash at 0x0)"
+          },
+          {
             "path": "build/c5_deauth.bin",
             "label": "Application image (flash at 0x10000)"
           },

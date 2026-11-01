@@ -82,6 +82,25 @@ and send targeted 802.11 deauthentication frames across 2.4 GHz and 5 GHz.
    idf.py -p COM12 flash monitor
    ```
 
+### Single-file flash
+
+The [latest release](https://github.com/14790897/esp32c5-deauth/releases/latest)
+also provides `c5_deauth_full.bin`, a 4 MB merged image containing the
+bootloader, partition table, and application. Flash it at offset `0x0`:
+
+```bat
+python -m esptool --chip esp32c5 -p COM12 -b 460800 write-flash --flash-mode dio --flash-freq 80m --flash-size 4MB 0x0 c5_deauth_full.bin
+```
+
+To generate it yourself after `idf.py build`, run `merge_c5.bat`, or:
+
+```bat
+python -m esptool --chip esp32c5 merge-bin -o build\c5_deauth_full.bin --target-offset 0 --flash-mode dio --flash-freq 80m --flash-size 4MB --pad-to-size 4MB 0x2000 build\bootloader\bootloader.bin 0x8000 build\partition_table\partition-table.bin 0x10000 build\c5_deauth.bin
+```
+
+The full image covers the whole 4 MB flash, including the NVS region; the
+firmware re-initializes NVS on first boot.
+
 ## Usage
 
 Open the serial console at 115200 baud (or use `console_c5.py`):
@@ -135,7 +154,7 @@ the client from another machine) while it sweeps.
 
 ```text
 CMakeLists.txt, sdkconfig.defaults, main/   firmware
-build_c5.bat, flash_c5.bat                  Windows helpers
+build_c5.bat, flash_c5.bat, merge_c5.bat   Windows helpers
 console_c5.py                               serial CLI client
 tools/make_toolchain_shim.py                create the `as` shim from your toolchain
 tools/patch_libnet80211.py                  patch your local C5 Wi-Fi library

